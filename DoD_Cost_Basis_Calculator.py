@@ -33,10 +33,11 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
     """Calculate the security price based on the type of security and date of death."""
     try:
         security = yf.Ticker(ticker)
-        is_weekend = date_of_death.weekday() >= 5
+        nyse = mcal.get_calendar('NYSE')
+        is_weekend_or_holiday = date_of_death.weekday() >= 5 or not nyse.valid_days(start_date=date_of_death, end_date=date_of_death).size
 
         if is_mutual_fund(ticker_type):
-            if is_weekend:
+            if is_weekend_or_holiday:
                 pricing_date = get_previous_business_day(date_of_death)
             else:
                 pricing_date = date_of_death
@@ -59,21 +60,21 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                 }
 
             return {
-                'Price': hist['Close'][0],
-                'Note': f"Mutual Fund - Using {'Friday' if is_weekend else 'date of death'} closing price",
-                'Close': hist['Close'][0],
+                'Price': round(hist['Close'][0], 2),
+                'Note': f"Mutual Fund - Using {'Friday' if is_weekend_or_holiday else 'date of death'} closing price",
+                'Close': round(hist['Close'][0], 2),
                 'High': None,  # Not used for mutual funds
                 'Low': None,  # Not used for mutual funds
                 'Friday_High': None,
                 'Friday_Low': None,
-                'Friday_Close': hist['Close'][0] if is_weekend else None,
+                'Friday_Close': round(hist['Close'][0], 2) if is_weekend_or_holiday else None,
                 'Monday_High': None,
                 'Monday_Low': None,
                 'Monday_Close': None
             }
 
         else:  # Stock or ETF
-            if is_weekend:
+            if is_weekend_or_holiday:
                 # Get Friday and Monday prices
                 friday = get_previous_business_day(date_of_death)
                 monday = get_next_business_day(date_of_death)
@@ -100,17 +101,17 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                 monday_avg = (monday_hist['High'][0] + monday_hist['Low'][0]) / 2
 
                 return {
-                    'Price': (friday_avg + monday_avg) / 2,
-                    'Note': "Weekend price - Average of Friday/Monday",
+                    'Price': round((friday_avg + monday_avg) / 2, 2),
+                    'Note': "Weekend/Holiday price - Average of Previous/Next Business Day",
                     'Close': None,
                     'High': None,
                     'Low': None,
-                    'Friday_High': friday_hist['High'][0],
-                    'Friday_Low': friday_hist['Low'][0],
-                    'Friday_Close': friday_hist['Close'][0],
-                    'Monday_High': monday_hist['High'][0],
-                    'Monday_Low': monday_hist['Low'][0],
-                    'Monday_Close': monday_hist['Close'][0]
+                    'Friday_High': round(friday_hist['High'][0], 2),
+                    'Friday_Low': round(friday_hist['Low'][0], 2),
+                    'Friday_Close': round(friday_hist['Close'][0], 2),
+                    'Monday_High': round(monday_hist['High'][0], 2),
+                    'Monday_Low': round(monday_hist['Low'][0], 2),
+                    'Monday_Close': round(monday_hist['Close'][0], 2)
                 }
             else:
                 # Get single day high/low average
@@ -131,11 +132,11 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                     }
 
                 return {
-                    'Price': (hist['High'][0] + hist['Low'][0]) / 2,
-                    'Note': "Regular trading day price",
-                    'Close': hist['Close'][0],
-                    'High': hist['High'][0],
-                    'Low': hist['Low'][0],
+                    'Price': round((hist['High'][0] + hist['Low'][0]) / 2, 2),
+                    'Note': "Regular Trading Day High/Low Average",
+                    'Close': round(hist['Close'][0], 2),
+                    'High': round(hist['High'][0], 2),
+                    'Low': round(hist['Low'][0], 2),
                     'Friday_High': None,
                     'Friday_Low': None,
                     'Friday_Close': None,
@@ -187,18 +188,18 @@ def main():
                 price = result_dict['Price']
 
                 result = {
+                    'Date': date_of_death,
                     'Ticker': row['Ticker'],
                     'Shares': row['Shares'],
                     'Price': price,
-                    'Total Value': price * row['Shares'] if price else None,
-                    'Note': result_dict['Note']
+                    'Total Value': round(price * row['Shares'], 2) if price else None,
                 }
 
-                # Add price details based on security type and whether it's a weekend
+                # Add price details based on security type and whether it's a weekend or holiday
                 if is_mutual_fund(row['Type']):
                     result['Closing Price'] = result_dict['Close']
                 else:
-                    if result_dict['Friday_High'] is not None:  # Weekend case
+                    if result_dict['Friday_High'] is not None:  # Weekend/Holiday case
                         result['Friday High'] = result_dict['Friday_High']
                         result['Friday Low'] = result_dict['Friday_Low']
                         result['Monday High'] = result_dict['Monday_High']
@@ -207,10 +208,16 @@ def main():
                         result['High'] = result_dict['High']
                         result['Low'] = result_dict['Low']
 
+                result['Note'] = result_dict['Note']
                 results.append(result)
 
             # Create results DataFrame
             results_df = pd.DataFrame(results)
+
+            # Reorder columns to move 'Note' to the last column
+            cols = results_df.columns.tolist()
+            cols.append(cols.pop(cols.index('Note')))
+            results_df = results_df[cols]
 
             # Display results in the app
             st.subheader("Results")
