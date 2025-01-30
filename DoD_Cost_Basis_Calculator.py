@@ -162,7 +162,7 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
 
 
 def main():
-    st.title("Date of Death New Cost Basis Calculator")
+    st.title("DoD Step-Up Cost Basis Calculator")
 
     # File upload
     uploaded_file = st.file_uploader("Upload Excel file with columns: Ticker, Shares, Type (List Previously Mentioned Titles in First Cell of Each Column)", type=['xlsx'])
