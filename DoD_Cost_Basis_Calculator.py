@@ -165,7 +165,7 @@ def main():
     st.title("Date of Death New Cost Basis Calculator")
 
     # File upload
-    uploaded_file = st.file_uploader("Upload Excel file with columns: Ticker, Shares, Type", type=['xlsx'])
+    uploaded_file = st.file_uploader("Upload Excel file with columns: Ticker, Shares, Type (List Previously Mentioned Titles in First Cell of Each Column)", type=['xlsx'])
 
     # Date input
     date_of_death = st.date_input("Date of Death")
