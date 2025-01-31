@@ -29,12 +29,13 @@ def get_previous_business_day(date):
     return prev_day
 
 
-def calculate_security_price(ticker, ticker_type, date_of_death):
+def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places):
     """Calculate the security price based on the type of security and date of death."""
     try:
         security = yf.Ticker(ticker)
         nyse = mcal.get_calendar('NYSE')
-        is_weekend_or_holiday = date_of_death.weekday() >= 5 or not nyse.valid_days(start_date=date_of_death, end_date=date_of_death).size
+        is_weekend_or_holiday = date_of_death.weekday() >= 5 or not nyse.valid_days(start_date=date_of_death,
+                                                                                    end_date=date_of_death).size
 
         if is_mutual_fund(ticker_type):
             if is_weekend_or_holiday:
@@ -59,15 +60,18 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                     'Monday_Close': None
                 }
 
+            # Round the closing price immediately when pulling from yfinance
+            close_price = round(hist['Close'][0], decimal_places)
+
             return {
-                'Price': round(hist['Close'][0], 2),
+                'Price': close_price,
                 'Note': f"Mutual Fund - Using {'Friday' if is_weekend_or_holiday else 'date of death'} closing price",
-                'Close': round(hist['Close'][0], 2),
+                'Close': close_price,
                 'High': None,  # Not used for mutual funds
                 'Low': None,  # Not used for mutual funds
                 'Friday_High': None,
                 'Friday_Low': None,
-                'Friday_Close': round(hist['Close'][0], 2) if is_weekend_or_holiday else None,
+                'Friday_Close': close_price if is_weekend_or_holiday else None,
                 'Monday_High': None,
                 'Monday_Low': None,
                 'Monday_Close': None
@@ -97,21 +101,31 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                         'Monday_Close': None
                     }
 
-                friday_avg = (friday_hist['High'][0] + friday_hist['Low'][0]) / 2
-                monday_avg = (monday_hist['High'][0] + monday_hist['Low'][0]) / 2
+                # Round individual prices before calculations
+                friday_high = round(friday_hist['High'][0], decimal_places)
+                friday_low = round(friday_hist['Low'][0], decimal_places)
+                friday_close = round(friday_hist['Close'][0], decimal_places)
+                monday_high = round(monday_hist['High'][0], decimal_places)
+                monday_low = round(monday_hist['Low'][0], decimal_places)
+                monday_close = round(monday_hist['Close'][0], decimal_places)
+
+                # Calculate averages using rounded prices
+                friday_avg = (friday_high + friday_low) / 2
+                monday_avg = (monday_high + monday_low) / 2
+                final_price = round((friday_avg + monday_avg) / 2, decimal_places)
 
                 return {
-                    'Price': round((friday_avg + monday_avg) / 2, 2),
+                    'Price': final_price,
                     'Note': "Weekend/Holiday price - Average of Previous/Next Business Day",
                     'Close': None,
                     'High': None,
                     'Low': None,
-                    'Friday_High': round(friday_hist['High'][0], 2),
-                    'Friday_Low': round(friday_hist['Low'][0], 2),
-                    'Friday_Close': round(friday_hist['Close'][0], 2),
-                    'Monday_High': round(monday_hist['High'][0], 2),
-                    'Monday_Low': round(monday_hist['Low'][0], 2),
-                    'Monday_Close': round(monday_hist['Close'][0], 2)
+                    'Friday_High': friday_high,
+                    'Friday_Low': friday_low,
+                    'Friday_Close': friday_close,
+                    'Monday_High': monday_high,
+                    'Monday_Low': monday_low,
+                    'Monday_Close': monday_close
                 }
             else:
                 # Get single day high/low average
@@ -131,12 +145,20 @@ def calculate_security_price(ticker, ticker_type, date_of_death):
                         'Monday_Close': None
                     }
 
+                # Round individual prices before calculations
+                high_price = round(hist['High'][0], decimal_places)
+                low_price = round(hist['Low'][0], decimal_places)
+                close_price = round(hist['Close'][0], decimal_places)
+
+                # Calculate average using rounded prices
+                final_price = round((high_price + low_price) / 2, decimal_places)
+
                 return {
-                    'Price': round((hist['High'][0] + hist['Low'][0]) / 2, 2),
+                    'Price': final_price,
                     'Note': "Regular Trading Day High/Low Average",
-                    'Close': round(hist['Close'][0], 2),
-                    'High': round(hist['High'][0], 2),
-                    'Low': round(hist['Low'][0], 2),
+                    'Close': close_price,
+                    'High': high_price,
+                    'Low': low_price,
                     'Friday_High': None,
                     'Friday_Low': None,
                     'Friday_Close': None,
@@ -165,10 +187,15 @@ def main():
     st.title("DoD Step-Up Cost Basis Calculator")
 
     # File upload
-    uploaded_file = st.file_uploader("Upload Excel file with columns: Ticker, Shares, Type (List Previously Mentioned Titles in First Cell of Each Column)", type=['xlsx'])
+    uploaded_file = st.file_uploader(
+        "Upload Excel file with columns: Ticker, Shares, Type (List Previously Mentioned Titles in First Cell of Each Column)",
+        type=['xlsx'])
 
     # Date input
     date_of_death = st.date_input("Date of Death")
+
+    # Add decimal places input
+    decimal_places = st.number_input("Number of decimal places for rounding", min_value=0, max_value=10, value=2)
 
     if uploaded_file and date_of_death:
         try:
@@ -184,7 +211,7 @@ def main():
             # Calculate prices for each security
             results = []
             for _, row in df.iterrows():
-                result_dict = calculate_security_price(row['Ticker'], row['Type'], date_of_death)
+                result_dict = calculate_security_price(row['Ticker'], row['Type'], date_of_death, decimal_places)
                 price = result_dict['Price']
 
                 result = {
@@ -192,7 +219,7 @@ def main():
                     'Ticker': row['Ticker'],
                     'Shares': row['Shares'],
                     'Price': price,
-                    'Total Value': round(price * row['Shares'], 2) if price else None,
+                    'Total Value': round(price * row['Shares'], decimal_places) if price else None,
                 }
 
                 # Add price details based on security type and whether it's a weekend or holiday
