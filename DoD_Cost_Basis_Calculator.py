@@ -43,8 +43,8 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
             else:
                 pricing_date = date_of_death
 
-            # Get mutual fund closing price
-            hist = security.history(start=pricing_date, end=pricing_date + timedelta(days=1))
+            # Get mutual fund closing price (auto_adjust=False to get actual close, not adjusted close)
+            hist = security.history(start=pricing_date, end=pricing_date + timedelta(days=1), auto_adjust=False)
             if hist.empty:
                 return {
                     'Price': None,
@@ -83,8 +83,9 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
                 friday = get_previous_business_day(date_of_death)
                 monday = get_next_business_day(date_of_death)
 
-                friday_hist = security.history(start=friday, end=friday + timedelta(days=1))
-                monday_hist = security.history(start=monday, end=monday + timedelta(days=1))
+                # auto_adjust=False to get actual high/low prices, not adjusted
+                friday_hist = security.history(start=friday, end=friday + timedelta(days=1), auto_adjust=False)
+                monday_hist = security.history(start=monday, end=monday + timedelta(days=1), auto_adjust=False)
 
                 if friday_hist.empty or monday_hist.empty:
                     return {
@@ -128,8 +129,8 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
                     'Monday_Close': monday_close
                 }
             else:
-                # Get single day high/low average
-                hist = security.history(start=date_of_death, end=date_of_death + timedelta(days=1))
+                # Get single day high/low average (auto_adjust=False to get actual prices)
+                hist = security.history(start=date_of_death, end=date_of_death + timedelta(days=1), auto_adjust=False)
                 if hist.empty:
                     return {
                         'Price': None,
@@ -184,6 +185,7 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
 
 
 def main():
+    st.set_page_config(page_title="Step Up Calculator")
     st.title("DoD Step-Up Cost Basis Calculator")
 
     # File upload
@@ -261,6 +263,8 @@ def main():
                 file_name=f"security_prices_{date_of_death}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+            st.balloons()
 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
