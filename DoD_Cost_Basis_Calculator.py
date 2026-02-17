@@ -29,13 +29,41 @@ def get_previous_business_day(date):
     return prev_day
 
 
-def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places):
-    """Calculate the security price based on the type of security and date of death."""
+def empty_result(note="No data available"):
+    """Return an empty result dictionary with a note."""
+    return {
+        'Price': None, 'Note': note,
+        'Close': None, 'High': None, 'Low': None,
+        'Friday_High': None, 'Friday_Low': None, 'Friday_Close': None,
+        'Monday_High': None, 'Monday_Low': None, 'Monday_Close': None
+    }
+
+
+def get_ticker_data(ticker, batch_data, single_ticker):
+    """Extract data for a specific ticker from batch download results."""
+    if single_ticker:
+        return batch_data
+    else:
+        try:
+            return batch_data[ticker]
+        except KeyError:
+            return pd.DataFrame()
+
+
+def get_day_data(ticker_data, target_date):
+    """Get data for a specific date from ticker data."""
+    if isinstance(target_date, pd.Timestamp):
+        target_date = target_date.date()
+    return ticker_data[ticker_data.index.date == target_date]
+
+
+def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places,
+                             batch_data, is_weekend_or_holiday, single_ticker):
+    """Calculate the security price using pre-fetched batch data."""
     try:
-        security = yf.Ticker(ticker)
-        nyse = mcal.get_calendar('NYSE')
-        is_weekend_or_holiday = date_of_death.weekday() >= 5 or not nyse.valid_days(start_date=date_of_death,
-                                                                                    end_date=date_of_death).size
+        ticker_data = get_ticker_data(ticker, batch_data, single_ticker)
+        if ticker_data.empty:
+            return empty_result(f"No data available for {ticker}")
 
         if is_mutual_fund(ticker_type):
             if is_weekend_or_holiday:
@@ -43,74 +71,40 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
             else:
                 pricing_date = date_of_death
 
-            # Get mutual fund closing price (auto_adjust=False to get actual close, not adjusted close)
-            hist = security.history(start=pricing_date, end=pricing_date + timedelta(days=1), auto_adjust=False)
+            hist = get_day_data(ticker_data, pricing_date)
             if hist.empty:
-                return {
-                    'Price': None,
-                    'Note': "No data available for this date",
-                    'Close': None,
-                    'High': None,
-                    'Low': None,
-                    'Friday_High': None,
-                    'Friday_Low': None,
-                    'Friday_Close': None,
-                    'Monday_High': None,
-                    'Monday_Low': None,
-                    'Monday_Close': None
-                }
+                return empty_result("No data available for this date")
 
-            # Round the closing price immediately when pulling from yfinance
-            close_price = round(hist['Close'][0], decimal_places)
+            close_price = round(float(hist['Close'].iloc[0]), decimal_places)
 
             return {
                 'Price': close_price,
                 'Note': f"Mutual Fund - Using {'Friday' if is_weekend_or_holiday else 'date of death'} closing price",
                 'Close': close_price,
-                'High': None,  # Not used for mutual funds
-                'Low': None,  # Not used for mutual funds
-                'Friday_High': None,
-                'Friday_Low': None,
+                'High': None, 'Low': None,
+                'Friday_High': None, 'Friday_Low': None,
                 'Friday_Close': close_price if is_weekend_or_holiday else None,
-                'Monday_High': None,
-                'Monday_Low': None,
-                'Monday_Close': None
+                'Monday_High': None, 'Monday_Low': None, 'Monday_Close': None
             }
 
         else:  # Stock or ETF
             if is_weekend_or_holiday:
-                # Get Friday and Monday prices
                 friday = get_previous_business_day(date_of_death)
                 monday = get_next_business_day(date_of_death)
 
-                # auto_adjust=False to get actual high/low prices, not adjusted
-                friday_hist = security.history(start=friday, end=friday + timedelta(days=1), auto_adjust=False)
-                monday_hist = security.history(start=monday, end=monday + timedelta(days=1), auto_adjust=False)
+                friday_hist = get_day_data(ticker_data, friday)
+                monday_hist = get_day_data(ticker_data, monday)
 
                 if friday_hist.empty or monday_hist.empty:
-                    return {
-                        'Price': None,
-                        'Note': "No data available for this date range",
-                        'Close': None,
-                        'High': None,
-                        'Low': None,
-                        'Friday_High': None,
-                        'Friday_Low': None,
-                        'Friday_Close': None,
-                        'Monday_High': None,
-                        'Monday_Low': None,
-                        'Monday_Close': None
-                    }
+                    return empty_result("No data available for this date range")
 
-                # Round individual prices before calculations
-                friday_high = round(friday_hist['High'][0], decimal_places)
-                friday_low = round(friday_hist['Low'][0], decimal_places)
-                friday_close = round(friday_hist['Close'][0], decimal_places)
-                monday_high = round(monday_hist['High'][0], decimal_places)
-                monday_low = round(monday_hist['Low'][0], decimal_places)
-                monday_close = round(monday_hist['Close'][0], decimal_places)
+                friday_high = round(float(friday_hist['High'].iloc[0]), decimal_places)
+                friday_low = round(float(friday_hist['Low'].iloc[0]), decimal_places)
+                friday_close = round(float(friday_hist['Close'].iloc[0]), decimal_places)
+                monday_high = round(float(monday_hist['High'].iloc[0]), decimal_places)
+                monday_low = round(float(monday_hist['Low'].iloc[0]), decimal_places)
+                monday_close = round(float(monday_hist['Close'].iloc[0]), decimal_places)
 
-                # Calculate averages using rounded prices
                 friday_avg = (friday_high + friday_low) / 2
                 monday_avg = (monday_high + monday_low) / 2
                 final_price = round((friday_avg + monday_avg) / 2, decimal_places)
@@ -118,70 +112,30 @@ def calculate_security_price(ticker, ticker_type, date_of_death, decimal_places)
                 return {
                     'Price': final_price,
                     'Note': "Weekend/Holiday price - Average of Previous/Next Business Day",
-                    'Close': None,
-                    'High': None,
-                    'Low': None,
-                    'Friday_High': friday_high,
-                    'Friday_Low': friday_low,
-                    'Friday_Close': friday_close,
-                    'Monday_High': monday_high,
-                    'Monday_Low': monday_low,
-                    'Monday_Close': monday_close
+                    'Close': None, 'High': None, 'Low': None,
+                    'Friday_High': friday_high, 'Friday_Low': friday_low, 'Friday_Close': friday_close,
+                    'Monday_High': monday_high, 'Monday_Low': monday_low, 'Monday_Close': monday_close
                 }
             else:
-                # Get single day high/low average (auto_adjust=False to get actual prices)
-                hist = security.history(start=date_of_death, end=date_of_death + timedelta(days=1), auto_adjust=False)
+                hist = get_day_data(ticker_data, date_of_death)
                 if hist.empty:
-                    return {
-                        'Price': None,
-                        'Note': "No data available for this date",
-                        'Close': None,
-                        'High': None,
-                        'Low': None,
-                        'Friday_High': None,
-                        'Friday_Low': None,
-                        'Friday_Close': None,
-                        'Monday_High': None,
-                        'Monday_Low': None,
-                        'Monday_Close': None
-                    }
+                    return empty_result("No data available for this date")
 
-                # Round individual prices before calculations
-                high_price = round(hist['High'][0], decimal_places)
-                low_price = round(hist['Low'][0], decimal_places)
-                close_price = round(hist['Close'][0], decimal_places)
-
-                # Calculate average using rounded prices
+                high_price = round(float(hist['High'].iloc[0]), decimal_places)
+                low_price = round(float(hist['Low'].iloc[0]), decimal_places)
+                close_price = round(float(hist['Close'].iloc[0]), decimal_places)
                 final_price = round((high_price + low_price) / 2, decimal_places)
 
                 return {
                     'Price': final_price,
                     'Note': "Regular Trading Day High/Low Average",
-                    'Close': close_price,
-                    'High': high_price,
-                    'Low': low_price,
-                    'Friday_High': None,
-                    'Friday_Low': None,
-                    'Friday_Close': None,
-                    'Monday_High': None,
-                    'Monday_Low': None,
-                    'Monday_Close': None
+                    'Close': close_price, 'High': high_price, 'Low': low_price,
+                    'Friday_High': None, 'Friday_Low': None, 'Friday_Close': None,
+                    'Monday_High': None, 'Monday_Low': None, 'Monday_Close': None
                 }
 
     except Exception as e:
-        return {
-            'Price': None,
-            'Note': f"Error processing {ticker}: {str(e)}",
-            'Close': None,
-            'High': None,
-            'Low': None,
-            'Friday_High': None,
-            'Friday_Low': None,
-            'Friday_Close': None,
-            'Monday_High': None,
-            'Monday_Low': None,
-            'Monday_Close': None
-        }
+        return empty_result(f"Error processing {ticker}: {str(e)}")
 
 
 def main():
@@ -210,10 +164,39 @@ def main():
                 st.error("Excel file must contain 'Ticker', 'Shares', and 'Type' columns")
                 return
 
+            # Determine if date of death falls on a weekend or holiday
+            nyse = mcal.get_calendar('NYSE')
+            is_weekend_or_holiday = date_of_death.weekday() >= 5 or not nyse.valid_days(
+                start_date=date_of_death, end_date=date_of_death).size
+
+            # Determine date range for batch download
+            if is_weekend_or_holiday:
+                start_date = get_previous_business_day(date_of_death)
+                end_date = get_next_business_day(date_of_death) + timedelta(days=1)
+            else:
+                start_date = date_of_death
+                end_date = date_of_death + timedelta(days=1)
+
+            # Batch download all tickers in a single API call
+            tickers = df['Ticker'].unique().tolist()
+            single_ticker = len(tickers) == 1
+
+            if single_ticker:
+                batch_data = yf.download(
+                    tickers[0], start=start_date, end=end_date, auto_adjust=False
+                )
+            else:
+                batch_data = yf.download(
+                    tickers, start=start_date, end=end_date, auto_adjust=False, group_by='ticker'
+                )
+
             # Calculate prices for each security
             results = []
             for _, row in df.iterrows():
-                result_dict = calculate_security_price(row['Ticker'], row['Type'], date_of_death, decimal_places)
+                result_dict = calculate_security_price(
+                    row['Ticker'], row['Type'], date_of_death, decimal_places,
+                    batch_data, is_weekend_or_holiday, single_ticker
+                )
                 price = result_dict['Price']
 
                 result = {
